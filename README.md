@@ -193,6 +193,10 @@ Se não tem wsl, vá no prompt/powershell e digite wsl --install. Depois instale
 2. Abrir powershell como admin ou usar terminal docker.
 3. Comando: docker run -d -p 27017:27017 -v /data/db --name mongo1 mongo:8.0.1-noble
 
+Resultado:
+
+![img_6.png](img_6.png)
+
 Depois do container estar rodando: docker exec -it mongo1 bash
 
 ## Para verificar localização de data volumes 
@@ -219,4 +223,10 @@ Primeira coisa é ir em ``application.properties`` e:
 3. No app de test, colocar a string de conexão ``spring.data.mongodb.uri=mongodb://localhost:27017/workshop_mongo``;
 4. Coloque a dependência do docker;
 5. Não esquecer de inserir as variáveis de sistemas (path) com o caminho docker/bin.
+
+Ao rodar a aplicação, ele criará no Docker o container "workshop_mongo":
+
+![img_7.png](img_7.png)
+
+## Inserindo User
 

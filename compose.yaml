@@ -1,17 +1,12 @@
-version: '3.8'
-
 services:
-  mongo:
+  mongodb:
     image: mongo:latest
     container_name: mongo_container
-    environment:
-      - MONGO_INITDB_DATABASE=mydatabase
-      - MONGO_INITDB_ROOT_USERNAME=root
-      - MONGO_INITDB_ROOT_PASSWORD=secret
     ports:
       - "27017"
     volumes:
-      - mongo_data:/data/db
+      - mongodb_data:/data/db
 
 volumes:
-  mongo_data:
+  mongodb_data:
+
