@@ -216,6 +216,8 @@ Instale, coloque nova conexão e entra com localhost 27017.
 
 # Prática -  Criando Projeto Spring Boot com Docker
 
+[Collection Postman](https://github.com/devsuperior/nosql/blob/main/workshop-springboot2-mongo4/DSPosts.postman_collection.json)
+
 Primeira coisa é ir em ``application.properties`` e: 
 
 1. Definir um perfil de teste ``spring.profiles.active=test``;
@@ -228,5 +230,382 @@ Ao rodar a aplicação, ele criará no Docker o container "workshop_mongo":
 
 ![img_7.png](img_7.png)
 
+## Criando entidades e mapeamento
+
+Lembrar que usaremos a [opção 2 de agregação](#opção-2-de-agregação). Logo:
+
+- User não terá nada agregado a ele (somente ID's dos Posts);
+
+
+- Post terá o comentário e também o autor do post. 
+
+
+- Cada comentário também terá um autor.
+
+
+- Classes auxiliares ficarão no pacote models.embedded! ❗❗
+
+Embedded = objetos agregados a outro objeto principal (author para post)
+
 ## Inserindo User
 
+Crie a entidade User. Diferente de quando usamos os outros bancos, ela não terá @Entity e sim @Document.
+
+Serão anottations advindas do MongoDB.
+
+![img_8.png](img_8.png)
+
+Para que ela seja inserida corretamente no MongoDB Compass, precisamos configurar o ``compose.yaml``
+
+## Compose
+
+```yaml
+services:
+  mongodb:
+    image: mongo:latest
+    container_name: mongo_container
+    ports:
+      - "27017"
+    volumes:
+      - mongodb_data:/data/db
+
+volumes:
+  mongodb_data:
+```
+
+Com esse compose, ele criará um Container chamado "mongo_container", veja no docker:
+
+![img_9.png](img_9.png)
+
+Mas, para que possamos visualizar os dados inseridos no MongoDB compass, faremos o seguinte.
+
+A gente roda o compose (service e o container criado) > dashboard e adiciona a porta. A porta a ser adicionada precisa 
+ser igual a que está no docker.
+
+Veja na imagem acima, está "49571:27017", colocaremos a primeira porta:
+
+![img_10.png](img_10.png)
+
+## Author, Comment, Post
+
+Sabemos que o usuário não terá nenhum agregado (somente as referências para os Id's dos posts).
+
+### Post
+
+O Post já terá os seus atributos + o comentário e o autor do post.
+
+Para que Posts fiquem referenciados no User conforme pode ser visto no UML, criaremos no User uma lista de posts (public),
+com a anotação @DBRef(lazy = true).
+
+Esse lazy diz para a aplicação que quando formos buscar um Usuário, não é para carregar os seus posts. 
+Só carregamos os posts se chamarmos eles.
+
+Por fim, criar o PostRepository.
+
+Para iniciar dados, mesma coisa, ir no TestConfig.
+
+## Data base seeding
+
+Inserir na TestConfig.
+
+```java
+@PostConstruct
+public void init() {
+
+    //caso exista um Usuário, será deletado
+    //o banco sempre será iniciado vazio
+    userRepository.deleteAll();
+    postRepository.deleteAll();
+
+
+    User maria = new User(null, "Maria Brown", "maria@gmail.com");
+    User alex = new User(null, "Alex Green", "alex@gmail.com");
+    User bob = new User(null, "Bob Grey", "bob@gmail.com");
+
+    userRepository.saveAll(Arrays.asList(maria, alex, bob));
+
+    //veja no fim da instanciação, agregamos um author para o post
+    //usando os Users acima criados
+    Post post1 = new Post(null, Instant.parse("2021-02-13T11:15:01Z"), "Partiu viagem", "Vou viajar para São Paulo. Abraços!", new Author(maria));
+    Post post2 = new Post(null, Instant.parse("2021-02-14T10:05:49Z"), "Bom dia", "Acordei feliz hoje!", new Author(maria));
+
+    //mesma coisa nos comentarios, passamos um author, alocando um User instanciado
+    Comment c1 = new Comment("Boa viagem mano!", Instant.parse("2021-02-13T14:30:01Z"), new Author(alex));
+    Comment c2 = new Comment("Aproveite", Instant.parse("2021-02-13T15:38:05Z"), new Author(bob));
+    Comment c3 = new Comment("Tenha um ótimo dia!", Instant.parse("2021-02-14T12:34:26Z"), new Author(alex));
+
+    //entramos no Post, puxamos a lista de comentários e adicionamos como Array
+    //os comments criados acima (agregando os comments ao post)
+    post1.getComments().addAll(Arrays.asList(c1, c2));
+    post2.getComments().addAll(Arrays.asList(c3));
+
+    //depois de agregar tudo ao post, salvamos no banco
+    postRepository.saveAll(Arrays.asList(post1, post2));
+
+    //acessamos os posts da maria, e colocamos o post1 e 2 associados a ela
+    //afinal, um User tem uma lista de Posts, correto?
+    maria.getPosts().addAll(Arrays.asList(post1, post2));
+    //salva tudo do usuário
+    userRepository.save(maria);
+}
+```
+
+Rodando o projeto, podemos ver tudo no MongoDB Compass, veja:
+
+Posts - Repare o ID do post, ele será referenciado no Users
+
+![img_11.png](img_11.png)
+
+Users - Veja o post referenciado
+
+![img_12.png](img_12.png)
+
+## Endpoints
+
+Com a aplicação devidamente mapeada e com seeding, começaremos os nossos endpoints.
+
+### Users
+
+### GET all Users
+
+![img_15.png](img_15.png)
+
+#### Controller
+
+```java
+@GetMapping
+public ResponseEntity<Page<UserDTO>> findAll(Pageable pageable) {
+    Page<UserDTO> list = userService.findAll(pageable);
+    return ResponseEntity.ok().body(list);
+}
+```
+
+#### Service
+
+```java
+public Page<UserDTO> findAll(Pageable pageable) {
+    Page<User> users = userRepository.findAll(pageable);
+    return users.map(UserDTO::new);
+}
+```
+
+### GET User by id
+
+![img_16.png](img_16.png)
+
+#### Controller
+
+```java
+@GetMapping(value = "/{id}")
+public ResponseEntity<UserDTO> findById(@PathVariable String id) {
+    UserDTO obj = userService.findById(id);
+    return ResponseEntity.ok().body(obj);
+}
+```
+
+#### Service
+
+```java
+public UserDTO findById(String id) {
+    User user = userRepository.findById(id)
+            .orElseThrow(() -> new ResourceNotFound("Recurso não encontrado."));
+
+    return new UserDTO(user);
+}
+```
+
+### POST User
+
+![img_13.png](img_13.png)
+
+#### Controller
+
+```java
+@PostMapping
+public ResponseEntity<UserDTO> insert(@RequestBody UserDTO userDTO) {
+    userDTO = userService.insert(userDTO);
+    URI uri = ServletUriComponentsBuilder.fromCurrentRequest().path("/{id}").buildAndExpand(userDTO.getId()).toUri();
+    return ResponseEntity.created(uri).body(userDTO);
+}
+```
+
+#### Service
+
+```java
+public UserDTO insert(UserDTO userDTO) {
+    User user = new User();
+    copyDtoToEntity(userDTO, user);
+    //agora usar insert para o mongoDB, não save
+    user = userRepository.insert(user);
+    return new UserDTO(user);
+}
+```
+
+### PUT User
+
+O ID passado na requisição postman, foi um ID tirado do MongoDB compass.
+
+![img_14.png](img_14.png)
+
+#### Controller
+
+```java
+@PutMapping(value = "/{id}")
+public ResponseEntity<UserDTO> update(@PathVariable String id, @RequestBody UserDTO dto) {
+    dto = userService.update(id, dto);
+    return ResponseEntity.ok().body(dto);
+}
+```
+
+#### Service
+
+Criamos aqui um método private dentro do service só para reaproveitar a localização de um User por id:
+
+```java
+private User getEntityById(String id) {
+    Optional<User> user = userRepository.findById(id);
+    return user.orElseThrow(() -> new ResourceNotFound("Objeto não encontrado."));
+}
+```
+
+```java
+public UserDTO update(String id, UserDTO dto) {
+    try {
+        User entity = getEntityById(id);
+        copyDtoToEntity(dto, entity);
+        entity = userRepository.save(entity);
+        return new UserDTO(entity);
+    } catch (EntityNotFoundException e) {
+        throw new ResourceNotFound("Recurso não encontrado");
+    }
+}
+```
+
+### DELETE User
+
+![img_17.png](img_17.png)
+
+#### Controller
+
+```java
+@DeleteMapping(value = "/{id}")
+public ResponseEntity<UserDTO> delete(@PathVariable String id) {
+    userService.delete(id);
+    return ResponseEntity.noContent().build();
+}
+```
+
+#### Service
+
+```java
+public void delete(String id) {
+    getEntityById(id);
+    userRepository.deleteById(id);
+}
+```
+
+### GET User posts
+
+![img_18.png](img_18.png)
+
+#### PostDTO
+
+![img_19.png](img_19.png)
+
+#### Controller
+
+```java
+@GetMapping(value = "/{id}/posts")
+public ResponseEntity<List<PostDTO>> getUserPosts(@PathVariable String id) {
+    List<PostDTO> obj = userService.getUsersPosts(id);
+    return ResponseEntity.ok().body(obj);
+}
+```
+
+#### Service
+
+```java
+public List<PostDTO> getUsersPosts(String id) {
+    User user = getEntityById(id);
+    return user.getPosts().stream()
+            .map(PostDTO::new).toList();
+}
+```
+
+## Tratamento de Exceções
+
+Vá no pacote Controller, e crie um subpacote "exceptions".
+
+Crie:
+
+1. StandardError
+
+```java
+public class StandardError implements Serializable {
+	private static final long serialVersionUID = 1L;
+
+	private Long timestamp;
+	private Integer status;
+	private String error;
+	private String message;
+	private String path;
+}
+```
+
+2. ResourceExceptionHandler
+
+```java
+@ControllerAdvice
+public class ResourceExceptionHandler {
+
+	@ExceptionHandler(ResourceNotFoundException.class)
+	public ResponseEntity<StandardError> resourceNotFound(ResourceNotFoundException e, HttpServletRequest request) {
+		
+		HttpStatus status = HttpStatus.NOT_FOUND;
+		
+		StandardError error = new StandardError();
+		error.setError("Not found");
+		error.setMessage(e.getMessage());
+		error.setPath(request.getRequestURI());
+		error.setStatus(status.value());
+		error.setTimestamp(Instant.now());
+	
+		return ResponseEntity.status(status).body(error);
+	}
+}
+```
+
+### Post
+
+#### GET post by ID
+
+#### Controller
+
+```java
+@GetMapping(value = "/{id}")
+public PostDTO findById(@PathVariable String id) {
+    return postService.findById(id);
+}
+```
+
+#### Service
+
+```java
+public PostDTO findById(String id) {
+    Post post = postRepository.findById(id)
+            .orElseThrow(() -> new ResourceNotFound("Post not found"));
+        
+    return new PostDTO(post);
+}
+
+private Post getEntityById(String id) {
+    Optional<Post> post = postRepository.findById(id);
+    return post.orElseThrow(() -> new ResourceNotFound("Objeto não encontrado."));
+}
+```
+
+#### GET post by title (query methods)
+
+#### GET post by title (query operators)
+
+#### GET post full search
