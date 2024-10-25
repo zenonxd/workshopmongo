@@ -606,6 +606,162 @@ private Post getEntityById(String id) {
 
 #### GET post by title (query methods)
 
+[Spring Query Methods](https://docs.spring.io/spring-data/jpa/reference/jpa/query-methods.html)
+
+###### Controller
+
+```java
+@GetMapping("/titlesearch")
+public ResponseEntity<List<PostDTO>> searchByTitle(@RequestParam("text") String text) {
+    List<PostDTO> posts = postService.searchByTitle(text);
+    if (posts.isEmpty()) {
+        return ResponseEntity.notFound().build();
+    }
+    return ResponseEntity.ok(posts);
+}
+```
+
+###### Service
+
+```java
+public List<PostDTO> searchByTitle(String text) {
+    List<Post> posts = postRepository.findByTitleContaingIgnoreCase(text);
+
+    return posts.stream().map(PostDTO::new).toList();
+}
+```
+
+###### Repository
+
+```java
+@Repository
+public interface PostRepository extends MongoRepository<Post, String> {
+    List<Post> findByTitleContaingIgnoreCase(String text);
+}
+```
+
 #### GET post by title (query operators)
 
+[MongoDB Queries](https://www.mongodb.com/pt-br/docs/manual/reference/operator/query/regex)
+
+Inicialmente, a query seria assim:
+
+```
+{ <field>: { $regex: /pattern/, $options: '<options>' } }
+```
+
+```java
+@Query("{ 'title': { $regex: ?0, $options: 'i' } }")
+List<Post> searchTitle(String text);
+```
+
+Como pode notar, o field é o campo que estamos buscando.
+
+O pattern funciona da seguinte forma: colocamos uma "?" e após, a numeração do parâmetro. Se por ventura o campo text
+fosse o segundo parametro seria "?1".
+
 #### GET post full search
+
+Essa full search possui um start e end date, veja:
+
+![img_20.png](img_20.png)
+
+Nosso Post possui um instant, correto? Portanto, esse moment precisa estar **entre o start e end da requisição**.
+
+Como é full search, o text deve estar contido ou no **title, body ou nos comments**.
+
+Inicialmente a consulta no @Quey começará com uma lista de condições "end".
+
+O $and tem a seguinte sintaxe:
+
+{ $and: [ { <expression1> }, { <expression2> } , ... , { <expressionN> } ] }
+
+Cada expressão ali dentro será uma condicional.
+
+```java
+List<Post> fullSearch(String text, Instant startMoment, Instant endMoment);
+```
+
+As duas primeiras condicionais serão o startMoment e endMoment, ou seja, "?1 e ?2".
+
+O startMoment (?1), terá o operador $gte. Ele seleciona os documentos nos quais o valor do campo especificado é maior 
+ou igual a (ou seja, >=).
+
+Sintaxe: ``{ field: { $gte: value } }``
+
+O value é = ?1 (parâmetro do método no Repository).
+
+O endMoment (?2), terá o operador $lte. Ele seleciona os documentos em que o valor de field é menor ou igual ao value 
+especificado (ou seja, <=).
+
+Sintaxe: ``{ field: { $lte: value } }``
+
+O value é = ?2 (parâmetro do método no Repository).
+
+O terceiro e ultimo parâmetro a ser inserido dentro da condicional $and será os campos de text. Dessa vez, ele não será
+um search somente do title. Ele buscará no title, post e comments. Assim sendo, serão 03 fields, onde usaremos $or.
+
+``"{ 'title': { $regex: ?0, $options: 'i' } },
+"{ 'body': { $regex: ?0, $options: 'i' } }, 
+"{ 'comments.text': { $regex: ?0, $options: 'i' } } 
+``
+
+##### Repository
+
+```java
+    @Query("{ $and: [ " +
+            "{ 'moment': { $gte: ?1} }, " +
+            "{ 'moment': { $lte: ?2}}," +
+            "{ $or: [" +
+            "{ 'title': { $regex: ?0, $options: 'i' } }, " +
+            "{ 'body': { $regex: ?0, $options: 'i' } }, " +
+            "{ 'comments.text': { $regex: ?0, $options: 'i' } } " +
+            "]} " +
+            "]}")
+    List<Post> fullSearch(String text, Instant startMoment, Instant endMoment);
+```
+
+##### Service
+
+```java
+public List<PostDTO> fullSearch(String text, String start, String end) {
+    //esse epochmilli garante que se o usuário não passar o início,
+    // ele pegue a data de 1970 (menor valor possível)
+    Instant startMoment = convertMoment(start, Instant.ofEpochMilli(0L));
+
+    //Caso o usuário não passe nada, será o instant de agora.
+    //ou seja: com certeza não tem nenhum post da hora atual
+    Instant endMoment = convertMoment(end, Instant.now());
+
+    List<Post> posts = postRepository.fullSearch(text, startMoment, endMoment);
+
+    return posts.stream().map(PostDTO::new).toList();
+}
+
+private Instant convertMoment(String originalString, Instant alternative) {
+    try {
+        return Instant.parse(originalString);
+    }
+    catch (DateTimeParseException e) {
+        return alternative;
+    }
+}
+```
+
+##### Controller
+
+```java
+@GetMapping("/fullSearch")
+public ResponseEntity<List<PostDTO>> fullSearch(
+        @RequestParam("text") String text,
+        @RequestParam("start") String start,
+        @RequestParam("end") String end) {
+
+    List<PostDTO> posts = postService.fullSearch(text, start, end);
+    if (posts.isEmpty()) {
+        return ResponseEntity.notFound().build();
+    }
+    return ResponseEntity.ok(posts);
+}
+```
+
